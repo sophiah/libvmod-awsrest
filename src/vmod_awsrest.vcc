@@ -21,6 +21,8 @@ Append aws signature v4 to req/bereq.
 
 $Event event_function
 
+$Function BOOL v4_validate(STRING access_key, STRING secret_key)
+
 $Function VOID v4_generic(STRING service, STRING region, STRING access_key, STRING secret_key, STRING token = "", STRING signed_headers, STRING canonical_headers, BOOL feature = 0)
 
 Prototype
