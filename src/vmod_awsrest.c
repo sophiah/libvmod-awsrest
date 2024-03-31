@@ -22,12 +22,10 @@
 #include "vtim.h"
 #include "vcc_awsrest_if.h"
 
-
-int
 #if VRT_MAJOR_VERSION > 8U
-  vmod_event_function(VRT_CTX, struct vmod_priv *priv, enum vcl_event_e e)
+int  vmod_event_function(VRT_CTX, struct vmod_priv *priv, enum vcl_event_e e)
 #else
-  event_function(VRT_CTX, struct vmod_priv *priv, enum vcl_event_e e)
+int  event_function(VRT_CTX, struct vmod_priv *priv, enum vcl_event_e e)
 #endif
 {
 	return (0);
@@ -37,14 +35,7 @@ int
 
 static int compa(const void *a, const void *b)
 {
-    const char * const *pa = a;
-    const char * const *pb = b;
-    const char *a1, *b1;
-
-    for (a1 = pa[0], b1 = pb[0]; a1 < pa[1] && b1 < pb[1]; a1++, b1++)
-        if (*a1 != *b1)
-            return (*a1 - *b1);
-    return (0);
+    return strcmp(*(const char **)a, *(const char **)b);
 }
 
 bool isStartsWith(const char *prefix, const char *fullstr)
@@ -93,7 +84,7 @@ char * headersort(VRT_CTX, char *txt, char sep, char sfx)
     pe = pp + u;
 
     /* Collect params as pointer pairs */
-    np = 0;
+    np = 0; // number of params
     pp[np++] =  cu;
     for (cq =  cu; *cq != '\0'; cq++) {
         if (*cq == sep) {
@@ -122,12 +113,12 @@ char * headersort(VRT_CTX, char *txt, char sep, char sfx)
         if (pp[i + 1] == pp[i])
             continue;
         assert(pp[i + 1] > pp[i]);
-        if (*cq)
-            *p++ = *cq;
+        if (*cq) *p++ = *cq;
         memcpy(p, pp[i], pp[i + 1] - pp[i]);
         p += pp[i + 1] - pp[i];
         cq = &sep;
     }
+
     if(sfx){
         *p = sfx;
         p++;
@@ -186,23 +177,6 @@ static const char * vmod_hmac_sha256(VRT_CTX,
     return p;
 }
 
-static const char * vmod_v4_getSignature(VRT_CTX,
-    const char* secret_key, const char* dateStamp, const char* regionName, const char* serviceName, const char* string_to_sign
-){
-    size_t len = strlen(secret_key) + 5;
-    char key[len];
-    char *kp = key;
-    sprintf(kp,"AWS4%s",secret_key);
-
-    const char *kDate    = vmod_hmac_sha256(ctx,kp,strlen(kp), dateStamp, strlen(dateStamp),true);
-    const char *kRegion  = vmod_hmac_sha256(ctx,kDate,   32, regionName, strlen(regionName),true);
-    const char *kService = vmod_hmac_sha256(ctx,kRegion, 32, serviceName, strlen(serviceName),true);
-    const char *kSigning = vmod_hmac_sha256(ctx,kService,32, "aws4_request", 12,true);
-
-    return vmod_hmac_sha256(ctx,kSigning,32, string_to_sign,strlen(string_to_sign),false);
-}
-
-
 static const char * vmod_hash_sha256(VRT_CTX, const char *msg)
 {
     MHASH td;
@@ -223,6 +197,8 @@ static const char * vmod_hash_sha256(VRT_CTX, const char *msg)
     return p;
 }
 
+/////////////////////////////////////////////
+// Header Get
 // copy from https://github.com/varnish/varnish-modules/blob/master/src/vmod_header.c
 const struct gethdr_s hdr_null[HDR_BERESP + 1] = {
 	[HDR_REQ]	= { HDR_REQ,		"\0"},
@@ -267,6 +243,128 @@ VCL_HEADER vmod_dyn(VRT_CTX, enum gethdr_e where, VCL_STRING name)
 	hdr->where = where;
 	hdr->what = what;
 	return (hdr);
+}
+
+/// @brief AWS V4 Signature
+/// @param  
+/// @param secret_key
+/// @param dateStamp 
+/// @param regionName 
+/// @param serviceName 
+/// @param string_to_sign 
+/// @return 
+static const char * vmod_v4_getSignature(VRT_CTX,
+    const char* secret_key, const char* dateStamp, const char* regionName, const char* serviceName, const char* string_to_sign
+){
+    size_t len = strlen(secret_key) + 5;
+    char key[len];
+    char *kp = key;
+    sprintf(kp,"AWS4%s",secret_key);
+
+    const char *kDate    = vmod_hmac_sha256(ctx,kp,strlen(kp), dateStamp, strlen(dateStamp),true);
+    const char *kRegion  = vmod_hmac_sha256(ctx,kDate,   32, regionName, strlen(regionName),true);
+    const char *kService = vmod_hmac_sha256(ctx,kRegion, 32, serviceName, strlen(serviceName),true);
+    const char *kSigning = vmod_hmac_sha256(ctx,kService,32, "aws4_request", 12,true);
+
+    return vmod_hmac_sha256(ctx,kSigning,32, string_to_sign,strlen(string_to_sign),false);
+}
+
+////////////////////////////////////////////
+VCL_STRING vmod_lf(VRT_CTX)
+{
+    char *p;
+    p = WS_Alloc(ctx->ws,2);
+    strcpy(p,"\n");
+    return p;
+}
+
+char * formurl(VRT_CTX, char* url)
+{
+    char *adr, *ampadr, *eqadr;
+    char *pp, *p;
+    unsigned u;
+    int len = 0;
+    int cnt = 0;
+    const char *lst= url + strlen(url) -1;
+
+    adr = strchr(url, (int)'?');
+
+    if(adr == NULL){
+        return url;
+    }
+
+#if VRT_MAJOR_VERSION > 9
+    u = WS_ReserveAll(ctx->ws);
+#else
+    u = WS_Reserve(ctx->ws, 0);
+#endif
+    pp = p = ctx->ws->f;
+
+    len = adr - url;
+    if(len + 1 > u){ // 1=(null)
+        WS_Release(ctx->ws, 0);
+        WS_MarkOverflow(ctx->ws);
+        return url;
+    }
+    memcpy(p, url, len);
+    p+=len;
+    for(;lst >url;lst--){
+        if(*lst != '?' && *lst != '&'){
+            lst++;
+            break;
+        }
+    }
+    if(lst <= adr){
+        // url: /xxxx? /?
+        *p = 0;
+        p++;
+        WS_Release(ctx->ws, p - pp);
+        return(pp);
+    }
+
+    while(1){
+        ampadr = memchr(adr +1, (int)'&', lst - adr -1);
+        if(ampadr == NULL){
+            len = lst - adr;
+            if(p - pp + len + 2 > u){ // 2= strlen("=")+1(null)
+                WS_Release(ctx->ws, 0);
+                WS_MarkOverflow(ctx->ws);
+                return url;
+            }
+            memcpy(p, adr, len);
+            p+=len;
+
+            eqadr = memchr(adr +1, (int)'=', lst - adr -1);
+            if(eqadr == NULL){
+                cnt++;
+                *p = '=';
+                p++;
+            }
+            break;
+        }else{
+            eqadr = memchr(adr +1, (int)'=', ampadr - adr -1);
+            len = ampadr - adr;
+            if(p - pp + len + 2 > u){
+                WS_Release(ctx->ws, 0);
+                WS_MarkOverflow(ctx->ws);
+                return url;
+            }
+            memcpy(p, adr, len);
+            p+=len;
+            if(eqadr == NULL){
+                cnt++;
+                *p = '=';
+                p++;
+            }
+            adr = ampadr;
+        }
+    }
+    *p = 0;
+    p++;
+    WS_Release(ctx->ws, p - pp);
+
+    return(pp);
+
 }
 
 struct AWS_AUTH_ELEMENTS {
@@ -359,6 +457,7 @@ void getAwsAuthElementFromHttp(VRT_CTX,
     strcpy(authe->httpMethod, method);
 
     const char *requrl = http_req->hd[HTTP_HDR_URL].b;
+
     char *adr = strchr(requrl, (int)'?');
     if(adr == NULL) {
         int size = strlen(requrl) + 1;
@@ -366,25 +465,23 @@ void getAwsAuthElementFromHttp(VRT_CTX,
         ALLOC_AND_STRNCPY(authe->queryString, "", 1);
     }
     else{
-        int total_len = strlen(requrl);
-        long url_len = adr - requrl;
+        char* mutable_url = strdup(requrl);
+        char* normalizedUrl = formurl(ctx, mutable_url);
+        free(mutable_url);
+
+        int total_len = strlen(normalizedUrl);
+        char *x_adr = strchr(normalizedUrl, (int)'?');
+        long url_len = x_adr - normalizedUrl;
 
         char tmpform[8];
         sprintf(tmpform, "%s.%lds", "%", url_len);
 
         authe->requestUri = WS_Alloc(ctx->ws, url_len + 1);
-        sprintf(authe->requestUri , tmpform, requrl);
+        sprintf(authe->requestUri, tmpform, normalizedUrl);
 
-        /* TODO: need check parameter and sort it */
-        const char *qs = adr + 1;
-        if (strchr(qs, '=') == NULL) {
-            authe->queryString = WS_Alloc(ctx->ws, total_len - url_len + 2);
-            sprintf(authe->queryString, "%s=", qs );
-        }
-        else {
-            authe->queryString = WS_Alloc(ctx->ws, total_len - url_len + 1);
-            sprintf(authe->queryString, "%s", qs );
-        }
+        const char *qs = x_adr + 1;
+        ALLOC_AND_STRNCPY(authe->queryString, qs, total_len - url_len + 1);
+        authe->queryString = headersort(ctx, authe->queryString, '&', 0);
     }
 }
 
@@ -400,19 +497,20 @@ void composeAwsAuthElementForHeaders(VRT_CTX,
         int len_headerName = strlen(headerName) ;
         const char *headerVal = VRT_GetHdr(ctx, vmod_dyn(ctx, where, headerName));
         int len_headerVal = strlen(headerVal);
-        int currentHeaderLen = len_headerName + 1 + len_headerVal; /* name:val */
+        int currentHeaderLen = len_headerName + 1 + len_headerVal + 1; /* name:val \n */
 
-        char* tmp_full = WS_Alloc(ctx->ws, 
-              currentTotalLen + currentHeaderLen + 1 /* \n */
-        ) ;
+        VSLb(ctx->vsl, SLT_VCL_Log, "headerName: %s (%d) Val: %s (%d)", headerName, len_headerName, headerVal, len_headerVal );
+
+        char* tmp_full = WS_Alloc(ctx->ws, currentTotalLen + currentHeaderLen);
         if (currentTotalLen == 0) {
             sprintf(tmp_full, "%s:%s\n", headerName, headerVal);
         } else {
             sprintf(tmp_full, "%s%s:%s\n", authe->headerList, headerName, headerVal);
         }
-        currentTotalLen = currentTotalLen + currentHeaderLen + 1;
+        currentTotalLen = currentTotalLen + currentHeaderLen;
 
         ALLOC_AND_STRNCPY(authe->headerList, tmp_full, currentTotalLen);
+        VSLb(ctx->vsl, SLT_VCL_Log, "authe->headerList ==> %s", authe->headerList);
 
         headerName = strtok(NULL, ";");
     }
@@ -461,18 +559,18 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
                   + strlen(elements.contentPayloadHash);
     
     char *canonical_request = WS_Alloc(ctx->ws, totalSize);
-    int x_size = sprintf(canonical_request, "%s\n%s\n%s\n%s\n%s\n%s",
+    
+    sprintf(canonical_request, "%s\n%s\n%s\n%s\n%s\n%s",
             elements.httpMethod, elements.requestUri, elements.queryString,
             elements.headerList, elements.signedHeaders, elements.contentPayloadHash);
 
-    VSLb(ctx->vsl, SLT_VCL_Log, "x_size: %d, %d", x_size, totalSize );
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.httpMethod => size: %ld, %s", strlen(elements.httpMethod), elements.httpMethod );
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.requestUri => size: %ld, %s", strlen(elements.requestUri), elements.requestUri );
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.queryString => size: %ld, %s", strlen(elements.queryString), elements.queryString);
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.headerList => size: %ld, %s", strlen(elements.headerList), elements.headerList);
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.signedHeaders => size: %ld, %s", strlen(elements.signedHeaders), elements.signedHeaders);
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.contentPayloadHash => size: %ld, %s", strlen(elements.contentPayloadHash), elements.contentPayloadHash);
-    VSLb(ctx->vsl, SLT_VCL_Log, "canonical_request %s", canonical_request);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.httpMethod => size: %ld, %s", strlen(elements.httpMethod), elements.httpMethod );
+    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.requestUri => size: %ld, %s", strlen(elements.requestUri), elements.requestUri );
+    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.queryString => size: %ld, %s", strlen(elements.queryString), elements.queryString);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.headerList => size: %ld, %s", strlen(elements.headerList), elements.headerList);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.signedHeaders => size: %ld, %s", strlen(elements.signedHeaders), elements.signedHeaders);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.contentPayloadHash => size: %ld, %s", strlen(elements.contentPayloadHash), elements.contentPayloadHash);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "canonical_request => size %ld, %s", strlen(canonical_request), canonical_request);
 
     int len_credential_scope = strlen(elements.datestamp) + 1
                              + strlen(elements.region) + 1
@@ -496,7 +594,7 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
         vmod_hash_sha256(ctx, canonical_request)
     );
 
-    VSLb(ctx->vsl, SLT_VCL_Log, "string_to_sign => %s",  string_to_sign);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "string_to_sign => %s",  string_to_sign);
     const char *signature = vmod_v4_getSignature(ctx, secret_key, 
         elements.datestamp, 
         elements.region,
@@ -671,102 +769,4 @@ void vmod_v4_generic(VRT_CTX,
         VRT_SetHdr(ctx, &gs, token, vrt_magic_string_end);
     }
 #endif
-}
-
-VCL_STRING vmod_lf(VRT_CTX)
-{
-    char *p;
-    p = WS_Alloc(ctx->ws,2);
-    strcpy(p,"\n");
-    return p;
-}
-
-
-VCL_STRING vmod_formurl(VRT_CTX, VCL_STRING url)
-{
-    char *adr, *ampadr, *eqadr;
-    char *pp, *p;
-    unsigned u;
-    int len = 0;
-    int cnt = 0;
-    const char *lst= url + strlen(url) -1;
-
-    adr = strchr(url, (int)'?');
-
-    if(adr == NULL){
-        return url;
-    }
-
-#if VRT_MAJOR_VERSION > 9
-    u = WS_ReserveAll(ctx->ws);
-#else
-    u = WS_Reserve(ctx->ws, 0);
-#endif
-    pp = p = ctx->ws->f;
-
-    len = adr - url;
-    if(len + 1 > u){ // 1=(null)
-        WS_Release(ctx->ws, 0);
-        WS_MarkOverflow(ctx->ws);
-        return url;
-    }
-    memcpy(p, url, len);
-    p+=len;
-    for(;lst >url;lst--){
-        if(*lst != '?' && *lst != '&'){
-            lst++;
-            break;
-        }
-    }
-    if(lst <= adr){
-        // url: /xxxx? /?
-        *p = 0;
-        p++;
-        WS_Release(ctx->ws, p - pp);
-        return(pp);
-    }
-
-    while(1){
-        ampadr = memchr(adr +1, (int)'&', lst - adr -1);
-        if(ampadr == NULL){
-            len = lst - adr;
-            if(p - pp + len + 2 > u){ // 2= strlen("=")+1(null)
-                WS_Release(ctx->ws, 0);
-                WS_MarkOverflow(ctx->ws);
-                return url;
-            }
-            memcpy(p, adr, len);
-            p+=len;
-
-            eqadr = memchr(adr +1, (int)'=', lst - adr -1);
-            if(eqadr == NULL){
-                cnt++;
-                *p = '=';
-                p++;
-            }
-            break;
-        }else{
-            eqadr = memchr(adr +1, (int)'=', ampadr - adr -1);
-            len = ampadr - adr;
-            if(p - pp + len + 2 > u){
-                WS_Release(ctx->ws, 0);
-                WS_MarkOverflow(ctx->ws);
-                return url;
-            }
-            memcpy(p, adr, len);
-            p+=len;
-            if(eqadr == NULL){
-                cnt++;
-                *p = '=';
-                p++;
-            }
-            adr = ampadr;
-        }
-    }
-    *p = 0;
-    p++;
-    WS_Release(ctx->ws, p - pp);
-
-    return(pp);
-
 }
