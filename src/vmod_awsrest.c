@@ -499,18 +499,18 @@ void composeAwsAuthElementForHeaders(VRT_CTX,
         int len_headerVal = strlen(headerVal);
         int currentHeaderLen = len_headerName + 1 + len_headerVal + 1; /* name:val \n */
 
-        VSLb(ctx->vsl, SLT_VCL_Log, "headerName: %s (%d) Val: %s (%d)", headerName, len_headerName, headerVal, len_headerVal );
-
-        char* tmp_full = WS_Alloc(ctx->ws, currentTotalLen + currentHeaderLen);
+        char* tmp_full = WS_Alloc(ctx->ws, currentTotalLen + currentHeaderLen + 1);
         if (currentTotalLen == 0) {
             sprintf(tmp_full, "%s:%s\n", headerName, headerVal);
         } else {
             sprintf(tmp_full, "%s%s:%s\n", authe->headerList, headerName, headerVal);
         }
+        tmp_full[currentTotalLen + currentHeaderLen + 1] = '\0';
         currentTotalLen = currentTotalLen + currentHeaderLen;
 
-        ALLOC_AND_STRNCPY(authe->headerList, tmp_full, currentTotalLen);
-        VSLb(ctx->vsl, SLT_VCL_Log, "authe->headerList ==> %s", authe->headerList);
+        ALLOC_AND_STRNCPY(authe->headerList, tmp_full, currentTotalLen + 1);
+        authe->headerList[currentTotalLen + 1] = '\0';
+        // VSLb(ctx->vsl, SLT_VCL_Log, "authe->headerList ==> %s", authe->headerList);
 
         headerName = strtok(NULL, ";");
     }
@@ -567,7 +567,7 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
     // VSLb(ctx->vsl, SLT_VCL_Log, "elements.httpMethod => size: %ld, %s", strlen(elements.httpMethod), elements.httpMethod );
     // VSLb(ctx->vsl, SLT_VCL_Log, "elements.requestUri => size: %ld, %s", strlen(elements.requestUri), elements.requestUri );
     // VSLb(ctx->vsl, SLT_VCL_Log, "elements.queryString => size: %ld, %s", strlen(elements.queryString), elements.queryString);
-    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.headerList => size: %ld, %s", strlen(elements.headerList), elements.headerList);
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.headerList => size: %ld, %s", strlen(elements.headerList), elements.headerList);
     // VSLb(ctx->vsl, SLT_VCL_Log, "elements.signedHeaders => size: %ld, %s", strlen(elements.signedHeaders), elements.signedHeaders);
     // VSLb(ctx->vsl, SLT_VCL_Log, "elements.contentPayloadHash => size: %ld, %s", strlen(elements.contentPayloadHash), elements.contentPayloadHash);
     // VSLb(ctx->vsl, SLT_VCL_Log, "canonical_request => size %ld, %s", strlen(canonical_request), canonical_request);
