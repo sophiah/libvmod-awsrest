@@ -33,6 +33,7 @@ int
 	return (0);
 }
 
+#define ALLOC_AND_STRNCPY(d, f, s) d = WS_Alloc(ctx->ws, s); strncpy(d, f, s); 
 
 static int compa(const void *a, const void *b)
 {
@@ -136,8 +137,6 @@ char * headersort(VRT_CTX, char *txt, char sep, char sfx)
     WS_Release(ctx->ws, 0);
     return (r);
 }
-
-
 
 
 /////////////////////////////////////////////
@@ -301,18 +300,27 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
     while (splitToken!= NULL) {
         if (isStartsWith("Credential=", splitToken)) { 
             int fixSize = 11;
-            authe->credential = WS_Alloc(ctx->ws, strlen(splitToken) - fixSize + 1) ;
-            strcpy(authe->credential, splitToken + fixSize);
+            ALLOC_AND_STRNCPY(
+                authe->credential, 
+                splitToken + fixSize, 
+                strlen(splitToken) - fixSize + 1
+            );
         }
         if (isStartsWith("SignedHeaders=", splitToken)) {
             int fixSize = 14;
-            authe->signedHeaders = WS_Alloc(ctx->ws, strlen(splitToken) - fixSize + 1) ;
-            strcpy(authe->signedHeaders, splitToken + fixSize);
+            ALLOC_AND_STRNCPY(
+                authe->signedHeaders, 
+                splitToken + fixSize, 
+                strlen(splitToken) - fixSize+ 1
+            );
         }
         if (isStartsWith("Signature=", splitToken)) {
             int fixSize = 10;
-            authe->signature = WS_Alloc(ctx->ws, strlen(splitToken) - fixSize + 1) ;
-            strcpy(authe->signature, splitToken + fixSize);
+            ALLOC_AND_STRNCPY(
+                authe->signature, 
+                splitToken + fixSize, 
+                strlen(splitToken) - fixSize+ 1
+            );
         }
         splitToken = strtok(NULL, " ,");
     }
@@ -323,21 +331,18 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
     splitToken = strtok(mutable_str, "/");
     int idx = 0;
     while (splitToken != NULL) {
+        int allocSize = strlen(splitToken) + 1;
         if ( idx == 0) {
-            authe->accessKey = WS_Alloc(ctx->ws, strlen(splitToken) + 1) ;
-            strcpy(authe->accessKey, splitToken);
+            ALLOC_AND_STRNCPY(authe->accessKey, splitToken, allocSize);
         }
         else if ( idx == 1) {
-            authe->datestamp = WS_Alloc(ctx->ws, strlen(splitToken) + 1) ;
-            strcpy(authe->datestamp, splitToken);
+            ALLOC_AND_STRNCPY(authe->datestamp, splitToken, allocSize);
         }
         else if ( idx == 2) {
-            authe->region = WS_Alloc(ctx->ws, strlen(splitToken) + 1) ;
-            strcpy(authe->region, splitToken);
+            ALLOC_AND_STRNCPY(authe->region, splitToken, allocSize);
         }
         else if ( idx == 3) {
-            authe->service = WS_Alloc(ctx->ws, strlen(splitToken) + 1) ;
-            strcpy(authe->service, splitToken);
+            ALLOC_AND_STRNCPY(authe->service, splitToken, allocSize);
         }
         idx ++ ;
         splitToken = strtok(NULL, "/");
@@ -356,24 +361,30 @@ void getAwsAuthElementFromHttp(VRT_CTX,
     const char *requrl = http_req->hd[HTTP_HDR_URL].b;
     char *adr = strchr(requrl, (int)'?');
     if(adr == NULL) {
-        authe->requestUri = WS_Alloc(ctx->ws, strlen(requrl) + 1);
-        strcpy(authe->requestUri, requrl);
-
-        authe->queryString = WS_Alloc(ctx->ws, 1);
-        strcpy(authe->queryString, "");
+        int size = strlen(requrl) + 1;
+        ALLOC_AND_STRNCPY(authe->requestUri, requrl, size);
+        ALLOC_AND_STRNCPY(authe->queryString, "", 1);
     }
     else{
         int total_len = strlen(requrl);
         long url_len = adr - requrl;
 
-        char tmpform[32];
+        char tmpform[8];
         sprintf(tmpform, "%s.%lds", "%", url_len);
 
         authe->requestUri = WS_Alloc(ctx->ws, url_len + 1);
         sprintf(authe->requestUri , tmpform, requrl);
 
-        authe->queryString = WS_Alloc(ctx->ws, total_len - url_len + 1);
-        sprintf(authe->queryString, "%s", adr + 1 );
+        /* TODO: need check parameter and sort it */
+        const char *qs = adr + 1;
+        if (strchr(qs, '=') == NULL) {
+            authe->queryString = WS_Alloc(ctx->ws, total_len - url_len + 2);
+            sprintf(authe->queryString, "%s=", qs );
+        }
+        else {
+            authe->queryString = WS_Alloc(ctx->ws, total_len - url_len + 1);
+            sprintf(authe->queryString, "%s", qs );
+        }
     }
 }
 
@@ -389,22 +400,19 @@ void composeAwsAuthElementForHeaders(VRT_CTX,
         int len_headerName = strlen(headerName) ;
         const char *headerVal = VRT_GetHdr(ctx, vmod_dyn(ctx, where, headerName));
         int len_headerVal = strlen(headerVal);
+        int currentHeaderLen = len_headerName + 1 + len_headerVal; /* name:val */
 
         char* tmp_full = WS_Alloc(ctx->ws, 
-            (( currentTotalLen > 0 ) ? currentTotalLen: 0 ) /* "\n" */
-            + len_headerName + 1 /* ":" */ 
-            + len_headerVal + 2
+              currentTotalLen + currentHeaderLen + 1 /* \n */
         ) ;
         if (currentTotalLen == 0) {
             sprintf(tmp_full, "%s:%s\n", headerName, headerVal);
-            currentTotalLen = len_headerName + 1 + len_headerVal + 2;
         } else {
             sprintf(tmp_full, "%s%s:%s\n", authe->headerList, headerName, headerVal);
-            currentTotalLen = currentTotalLen + len_headerName + 1 + len_headerVal + 2;
         }
+        currentTotalLen = currentTotalLen + currentHeaderLen + 1;
 
-        authe->headerList = WS_Alloc(ctx->ws, currentTotalLen);
-        strcpy(authe->headerList, tmp_full);
+        ALLOC_AND_STRNCPY(authe->headerList, tmp_full, currentTotalLen);
 
         headerName = strtok(NULL, ";");
     }
@@ -442,8 +450,7 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
     composeAwsAuthElementForHeaders(ctx, &elements, where);
 
     const char *content_hash = VRT_GetHdr(ctx, vmod_dyn(ctx, where, "x-amz-content-sha256"));
-    elements.contentPayloadHash = WS_Alloc(ctx->ws, 65);
-    strncpy(elements.contentPayloadHash, content_hash, 64);
+    ALLOC_AND_STRNCPY(elements.contentPayloadHash, content_hash, 65);
     elements.contentPayloadHash[64] = '\0';
 
     int totalSize = strlen(elements.httpMethod) + 1
@@ -454,9 +461,18 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
                   + strlen(elements.contentPayloadHash);
     
     char *canonical_request = WS_Alloc(ctx->ws, totalSize);
-    sprintf(canonical_request, "%s\n%s\n%s\n%s\n%s\n%s",
+    int x_size = sprintf(canonical_request, "%s\n%s\n%s\n%s\n%s\n%s",
             elements.httpMethod, elements.requestUri, elements.queryString,
             elements.headerList, elements.signedHeaders, elements.contentPayloadHash);
+
+    VSLb(ctx->vsl, SLT_VCL_Log, "x_size: %d, %d", x_size, totalSize );
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.httpMethod => size: %ld, %s", strlen(elements.httpMethod), elements.httpMethod );
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.requestUri => size: %ld, %s", strlen(elements.requestUri), elements.requestUri );
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.queryString => size: %ld, %s", strlen(elements.queryString), elements.queryString);
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.headerList => size: %ld, %s", strlen(elements.headerList), elements.headerList);
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.signedHeaders => size: %ld, %s", strlen(elements.signedHeaders), elements.signedHeaders);
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.contentPayloadHash => size: %ld, %s", strlen(elements.contentPayloadHash), elements.contentPayloadHash);
+    VSLb(ctx->vsl, SLT_VCL_Log, "canonical_request %s", canonical_request);
 
     int len_credential_scope = strlen(elements.datestamp) + 1
                              + strlen(elements.region) + 1
@@ -480,12 +496,14 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
         vmod_hash_sha256(ctx, canonical_request)
     );
 
+    VSLb(ctx->vsl, SLT_VCL_Log, "string_to_sign => %s",  string_to_sign);
     const char *signature = vmod_v4_getSignature(ctx, secret_key, 
         elements.datestamp, 
         elements.region,
         elements.service,
         string_to_sign);
 
+    VSLb(ctx->vsl, SLT_VCL_Log, "signature => %s",  signature);
     int compareResult = strcmp(elements.signature, signature);
     if ( compareResult == 0 ) {
         return true;
@@ -493,8 +511,6 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
     else {
         return false;
     }
-
-    // VSLb(ctx->vsl, SLT_VCL_Log, "signature => %s",  signature);
 }
 
 void vmod_v4_generic(VRT_CTX,
@@ -528,7 +544,7 @@ void vmod_v4_generic(VRT_CTX,
 
     ////////////////
     //create date
-    char amzdate[33];
+    char amzdate[17];
     char datestamp[9];
 
     const char *x_amzdate = VRT_GetHdr(ctx, vmod_dyn(ctx, gs.where, "x-amz-date"));
@@ -540,7 +556,7 @@ void vmod_v4_generic(VRT_CTX,
 
     ////////////////
     //create payload
-    const char * payload_hash = vmod_hash_sha256(ctx, "");
+    const char * payload_hash = VRT_GetHdr(ctx, vmod_dyn(ctx, gs.where, "x-amz-content-sha256"));
 
     ////////////////
     //create signed headers
