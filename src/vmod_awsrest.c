@@ -186,7 +186,6 @@ static const char * vmod_hash_sha256(VRT_CTX, const char *msg)
     char *p;
     char *ptmp;
     td = mhash_init(hash);
-    VSLb(ctx->vsl, SLT_VCL_Log, "vmod_hash_sha256 => size %ld", strlen(msg));
     mhash(td, msg, strlen(msg));
     mhash_deinit(td, h);
     p = WS_Alloc(ctx->ws, mhash_get_block_size(hash)*2 + 1);
@@ -394,7 +393,10 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
 ) {
     // split the current auth into auth elements
     char *splitToken;
-    char* mutable_str  = strdup(current_auth);
+    char* mutable_str  = WS_Alloc(ctx->ws, strlen(current_auth) + 1);
+    memset(mutable_str, '\0', strlen(current_auth) + 1);
+    strcpy(mutable_str, current_auth);
+
     splitToken = strtok(mutable_str, " ,");
     while (splitToken!= NULL) {
         if (isStartsWith("Credential=", splitToken)) { 
@@ -402,7 +404,7 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
             ALLOC_AND_STRNCPY(
                 authe->credential, 
                 splitToken + fixSize, 
-                strlen(splitToken) - fixSize + 1
+                strlen(splitToken) - fixSize 
             );
         }
         if (isStartsWith("SignedHeaders=", splitToken)) {
@@ -410,7 +412,7 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
             ALLOC_AND_STRNCPY(
                 authe->signedHeaders, 
                 splitToken + fixSize, 
-                strlen(splitToken) - fixSize+ 1
+                strlen(splitToken) - fixSize
             );
         }
         if (isStartsWith("Signature=", splitToken)) {
@@ -418,15 +420,17 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
             ALLOC_AND_STRNCPY(
                 authe->signature, 
                 splitToken + fixSize, 
-                strlen(splitToken) - fixSize+ 1
+                strlen(splitToken) - fixSize
             );
         }
         splitToken = strtok(NULL, " ,");
     }
-    free(mutable_str);
 
     // split credential to detail information
-    mutable_str  = strdup(authe->credential);
+    mutable_str  = WS_Alloc(ctx->ws, strlen(authe->credential) + 1);
+    memset(mutable_str, '\0', strlen(authe->credential) + 1);
+    strcpy(mutable_str, authe->credential);
+
     splitToken = strtok(mutable_str, "/");
     int idx = 0;
     while (splitToken != NULL) {
@@ -446,7 +450,6 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
         idx ++ ;
         splitToken = strtok(NULL, "/");
     }
-    free(mutable_str);
 }
 
 void getAwsAuthElementFromHttp(VRT_CTX,
@@ -466,9 +469,8 @@ void getAwsAuthElementFromHttp(VRT_CTX,
         ALLOC_AND_STRNCPY(authe->queryString, "", 1);
     }
     else{
-        char* mutable_url = strdup(requrl);
+        char* mutable_url = WS_Copy(ctx->ws, requrl, strlen(requrl));
         char* normalizedUrl = formurl(ctx, mutable_url);
-        free(mutable_url);
 
         int total_len = strlen(normalizedUrl);
         char *x_adr = strchr(normalizedUrl, (int)'?');
@@ -478,6 +480,7 @@ void getAwsAuthElementFromHttp(VRT_CTX,
         sprintf(tmpform, "%s.%lds", "%", url_len);
 
         authe->requestUri = WS_Alloc(ctx->ws, url_len + 1);
+        memset(authe->requestUri, '\0', url_len + 1);
         sprintf(authe->requestUri, tmpform, normalizedUrl);
 
         const char *qs = x_adr + 1;
@@ -498,9 +501,11 @@ void composeAwsAuthElementForHeaders(VRT_CTX,
         int len_headerName = strlen(headerName) ;
         const char *headerVal = VRT_GetHdr(ctx, vmod_dyn(ctx, where, headerName));
         int len_headerVal = strlen(headerVal);
-        int currentHeaderLen = len_headerName + 1 + len_headerVal + 1 ; /* name:val \n */
+        int currentHeaderLen = len_headerName + 1 + len_headerVal + 2 ; /* name:val \n */
 
         char* tmp_full = WS_Alloc(ctx->ws, currentTotalLen + currentHeaderLen + 1);
+        memset(tmp_full, '\0', currentTotalLen + currentHeaderLen + 1);
+
         if (currentTotalLen == 0) {
             sprintf(tmp_full, "%s:%s\n", headerName, headerVal);
         } else {
@@ -508,7 +513,7 @@ void composeAwsAuthElementForHeaders(VRT_CTX,
         }
         currentTotalLen = currentTotalLen + currentHeaderLen;
 
-        ALLOC_AND_STRNCPY(authe->headerList, tmp_full, currentTotalLen + 1);
+        ALLOC_AND_STRNCPY(authe->headerList, tmp_full, currentTotalLen);
         // VSLb(ctx->vsl, SLT_VCL_Log, "authe->headerList ==> %s", authe->headerList);
 
         headerName = strtok(NULL, ";");
@@ -548,26 +553,19 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
     const char *content_hash = VRT_GetHdr(ctx, vmod_dyn(ctx, where, "x-amz-content-sha256"));
     ALLOC_AND_STRNCPY(elements.contentPayloadHash, content_hash, 64);
 
-    int totalSize = strlen(elements.httpMethod) + 1
-                  + strlen(elements.requestUri) + 1
-                  + strlen(elements.queryString) + 1
-                  + strlen(elements.headerList) + 1
-                  + strlen(elements.signedHeaders) + 1
+    int totalSize = strlen(elements.httpMethod) + 2
+                  + strlen(elements.requestUri) + 2
+                  + strlen(elements.queryString) + 2
+                  + strlen(elements.headerList) + 2
+                  + strlen(elements.signedHeaders) + 2
                   + strlen(elements.contentPayloadHash);
     
-    char *canonical_request = WS_Alloc(ctx->ws, totalSize);
+    char *canonical_request = WS_Alloc(ctx->ws, totalSize + 1);
+    memset(canonical_request, '\0', totalSize + 1);
     
     sprintf(canonical_request, "%s\n%s\n%s\n%s\n%s\n%s",
             elements.httpMethod, elements.requestUri, elements.queryString,
             elements.headerList, elements.signedHeaders, elements.contentPayloadHash);
-
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.httpMethod => size: %ld, %s", strlen(elements.httpMethod), elements.httpMethod );
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.requestUri => size: %ld, %s", strlen(elements.requestUri), elements.requestUri );
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.queryString => size: %ld, %s", strlen(elements.queryString), elements.queryString);
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.headerList => size: %ld, %s", strlen(elements.headerList), elements.headerList);
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.signedHeaders => size: %ld, %s", strlen(elements.signedHeaders), elements.signedHeaders);
-    VSLb(ctx->vsl, SLT_VCL_Log, "elements.contentPayloadHash => size: %ld, %s", strlen(elements.contentPayloadHash), elements.contentPayloadHash);
-    // VSLb(ctx->vsl, SLT_VCL_Log, "canonical_request => size %ld, %s", strlen(canonical_request), canonical_request);
 
     int len_credential_scope = strlen(elements.datestamp) + 1
                              + strlen(elements.region) + 1
@@ -593,14 +591,14 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
         vmod_hash_sha256(ctx, canonical_request)
     );
 
-    VSLb(ctx->vsl, SLT_VCL_Log, "string_to_sign => %s",  string_to_sign);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "string_to_sign => %s",  string_to_sign);
     const char *signature = vmod_v4_getSignature(ctx, secret_key, 
         elements.datestamp, 
         elements.region,
         elements.service,
         string_to_sign);
 
-    VSLb(ctx->vsl, SLT_VCL_Log, "signature => %s",  signature);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "signature => %s",  signature);
     int compareResult = strcmp(elements.signature, signature);
     if ( compareResult == 0 ) {
         return true;
