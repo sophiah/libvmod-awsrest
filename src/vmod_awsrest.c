@@ -393,9 +393,7 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
 ) {
     // split the current auth into auth elements
     char *splitToken;
-    char* mutable_str  = WS_Alloc(ctx->ws, strlen(current_auth) + 1);
-    memset(mutable_str, '\0', strlen(current_auth) + 1);
-    strcpy(mutable_str, current_auth);
+    char* mutable_str = WS_Copy(ctx->ws, current_auth, strlen(current_auth));
 
     splitToken = strtok(mutable_str, " ,");
     while (splitToken!= NULL) {
@@ -427,9 +425,7 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
     }
 
     // split credential to detail information
-    mutable_str  = WS_Alloc(ctx->ws, strlen(authe->credential) + 1);
-    memset(mutable_str, '\0', strlen(authe->credential) + 1);
-    strcpy(mutable_str, authe->credential);
+    mutable_str = WS_Copy(ctx->ws, authe->credential, strlen(authe->credential));
 
     splitToken = strtok(mutable_str, "/");
     int idx = 0;
@@ -457,11 +453,10 @@ void getAwsAuthElementFromHttp(VRT_CTX,
     struct http *http_req
 ) {
     const char *method = http_req->hd[HTTP_HDR_METHOD].b;
-    authe->httpMethod = WS_Alloc(ctx->ws, strlen(method) + 1);
-    strcpy(authe->httpMethod, method);
+    int method_len = strlen(method);
+    ALLOC_AND_STRNCPY( authe->httpMethod, method, method_len);
 
     const char *requrl = http_req->hd[HTTP_HDR_URL].b;
-
     char *adr = strchr(requrl, (int)'?');
     if(adr == NULL) {
         int size = strlen(requrl) + 1;
@@ -477,6 +472,7 @@ void getAwsAuthElementFromHttp(VRT_CTX,
         long url_len = x_adr - normalizedUrl;
 
         char tmpform[8];
+        memset(tmpform, '\0', 8);
         sprintf(tmpform, "%s.%lds", "%", url_len);
 
         authe->requestUri = WS_Alloc(ctx->ws, url_len + 1);
