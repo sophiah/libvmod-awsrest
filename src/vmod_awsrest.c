@@ -31,7 +31,7 @@ int  event_function(VRT_CTX, struct vmod_priv *priv, enum vcl_event_e e)
 	return (0);
 }
 
-#define ALLOC_AND_STRNCPY(d, f, s) d = WS_Alloc(ctx->ws, s); strncpy(d, f, s); 
+#define ALLOC_AND_STRNCPY(d, f, s) d = WS_Alloc(ctx->ws, s + 1); memset(d, '\0', s + 1); strncpy(d, f, s); 
 
 static int compa(const void *a, const void *b)
 {
@@ -186,11 +186,12 @@ static const char * vmod_hash_sha256(VRT_CTX, const char *msg)
     char *p;
     char *ptmp;
     td = mhash_init(hash);
+    VSLb(ctx->vsl, SLT_VCL_Log, "vmod_hash_sha256 => size %ld", strlen(msg));
     mhash(td, msg, strlen(msg));
     mhash_deinit(td, h);
-    p = WS_Alloc(ctx->ws,mhash_get_block_size(hash)*2 + 1);
+    p = WS_Alloc(ctx->ws, mhash_get_block_size(hash)*2 + 1);
     ptmp = p;
-    for (i = 0; i<mhash_get_block_size(hash);i++) {
+    for (i = 0; i < mhash_get_block_size(hash);i++) {
         sprintf(ptmp,"%.2x",h[i]);
         ptmp+=2;
     }
@@ -490,14 +491,14 @@ void composeAwsAuthElementForHeaders(VRT_CTX,
     enum gethdr_e where
 ) {
     char* headerName;
-    char* fullHeaderList = strdup(authe->signedHeaders);
+    char* fullHeaderList = WS_Copy(ctx->ws, authe->signedHeaders, strlen(authe->signedHeaders));
     headerName = strtok(fullHeaderList, ";");
     int currentTotalLen = 0;
     while (headerName != NULL) {
         int len_headerName = strlen(headerName) ;
         const char *headerVal = VRT_GetHdr(ctx, vmod_dyn(ctx, where, headerName));
         int len_headerVal = strlen(headerVal);
-        int currentHeaderLen = len_headerName + 1 + len_headerVal + 1; /* name:val \n */
+        int currentHeaderLen = len_headerName + 1 + len_headerVal + 1 ; /* name:val \n */
 
         char* tmp_full = WS_Alloc(ctx->ws, currentTotalLen + currentHeaderLen + 1);
         if (currentTotalLen == 0) {
@@ -505,16 +506,13 @@ void composeAwsAuthElementForHeaders(VRT_CTX,
         } else {
             sprintf(tmp_full, "%s%s:%s\n", authe->headerList, headerName, headerVal);
         }
-        tmp_full[currentTotalLen + currentHeaderLen + 1] = '\0';
         currentTotalLen = currentTotalLen + currentHeaderLen;
 
         ALLOC_AND_STRNCPY(authe->headerList, tmp_full, currentTotalLen + 1);
-        authe->headerList[currentTotalLen + 1] = '\0';
         // VSLb(ctx->vsl, SLT_VCL_Log, "authe->headerList ==> %s", authe->headerList);
 
         headerName = strtok(NULL, ";");
     }
-    free(fullHeaderList);
 }
 
 
@@ -548,8 +546,7 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
     composeAwsAuthElementForHeaders(ctx, &elements, where);
 
     const char *content_hash = VRT_GetHdr(ctx, vmod_dyn(ctx, where, "x-amz-content-sha256"));
-    ALLOC_AND_STRNCPY(elements.contentPayloadHash, content_hash, 65);
-    elements.contentPayloadHash[64] = '\0';
+    ALLOC_AND_STRNCPY(elements.contentPayloadHash, content_hash, 64);
 
     int totalSize = strlen(elements.httpMethod) + 1
                   + strlen(elements.requestUri) + 1
@@ -564,12 +561,12 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
             elements.httpMethod, elements.requestUri, elements.queryString,
             elements.headerList, elements.signedHeaders, elements.contentPayloadHash);
 
-    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.httpMethod => size: %ld, %s", strlen(elements.httpMethod), elements.httpMethod );
-    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.requestUri => size: %ld, %s", strlen(elements.requestUri), elements.requestUri );
-    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.queryString => size: %ld, %s", strlen(elements.queryString), elements.queryString);
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.httpMethod => size: %ld, %s", strlen(elements.httpMethod), elements.httpMethod );
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.requestUri => size: %ld, %s", strlen(elements.requestUri), elements.requestUri );
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.queryString => size: %ld, %s", strlen(elements.queryString), elements.queryString);
     VSLb(ctx->vsl, SLT_VCL_Log, "elements.headerList => size: %ld, %s", strlen(elements.headerList), elements.headerList);
-    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.signedHeaders => size: %ld, %s", strlen(elements.signedHeaders), elements.signedHeaders);
-    // VSLb(ctx->vsl, SLT_VCL_Log, "elements.contentPayloadHash => size: %ld, %s", strlen(elements.contentPayloadHash), elements.contentPayloadHash);
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.signedHeaders => size: %ld, %s", strlen(elements.signedHeaders), elements.signedHeaders);
+    VSLb(ctx->vsl, SLT_VCL_Log, "elements.contentPayloadHash => size: %ld, %s", strlen(elements.contentPayloadHash), elements.contentPayloadHash);
     // VSLb(ctx->vsl, SLT_VCL_Log, "canonical_request => size %ld, %s", strlen(canonical_request), canonical_request);
 
     int len_credential_scope = strlen(elements.datestamp) + 1
@@ -577,7 +574,8 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
                              + strlen(elements.service) + 1
                              + 12; /* aws4_request */
 
-    char *credential_scope = WS_Alloc(ctx->ws, len_credential_scope);
+    char *credential_scope = WS_Alloc(ctx->ws, len_credential_scope + 1);
+    memset(credential_scope, '\0', len_credential_scope + 1);
     sprintf(credential_scope, "%s/%s/%s/aws4_request",
             elements.datestamp, elements.region, elements.service);
 
@@ -586,7 +584,8 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
                            + strlen(amz_date) + 2
                            + len_credential_scope + 2 
                            + 33;
-    char *string_to_sign = WS_Alloc(ctx->ws, string_to_sign_len);
+    char *string_to_sign = WS_Alloc(ctx->ws, string_to_sign_len + 1);
+    memset(string_to_sign, '\0', string_to_sign_len + 1);
 
     sprintf(string_to_sign, "AWS4-HMAC-SHA256\n%s\n%s\n%s", 
         amz_date,
@@ -594,7 +593,7 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
         vmod_hash_sha256(ctx, canonical_request)
     );
 
-    // VSLb(ctx->vsl, SLT_VCL_Log, "string_to_sign => %s",  string_to_sign);
+    VSLb(ctx->vsl, SLT_VCL_Log, "string_to_sign => %s",  string_to_sign);
     const char *signature = vmod_v4_getSignature(ctx, secret_key, 
         elements.datestamp, 
         elements.region,
@@ -612,161 +611,174 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
 }
 
 void vmod_v4_generic(VRT_CTX,
-    VCL_STRING service,               //= 's3';
-    VCL_STRING region,                //= 'ap-northeast-1';
-    VCL_STRING access_key,            //= 'your access key';
-    VCL_STRING secret_key,            //= 'your secret key';
-    VCL_STRING token,                 //= 'optional session token';
-    VCL_STRING signed_headers,        //= 'host;';// x-amz-content-sha256;x-amz-date is appended by default.
-    VCL_STRING canonical_headers,     //= 'host:s3-ap-northeast-1.amazonaws.com\n'
-    VCL_BOOL feature                  //= reserved param(for varnish4)
+	VCL_STRING service,               //= 's3';
+	VCL_STRING region,                //= 'ap-northeast-1';
+	VCL_STRING access_key,            //= 'your access key';
+	VCL_STRING secret_key,            //= 'your secret key';
+	VCL_STRING token,                 //= 'optional session token';
+	VCL_STRING signed_headers,       //= 'host;';// x-amz-content-sha256;x-amz-date is appended by default.
+	VCL_STRING canonical_headers,    //= 'host:s3-ap-northeast-1.amazonaws.com\n'
+	VCL_BOOL feature                  //= reserved param(for varnish4)
 ){
-    ////////////////
-    //get data
-    const char *method;
-    const char *requrl;
-    struct http *hp;
-    struct gethdr_s gs;
+	////////////////
+	//get data
+	const char *method;
+	const char *requrl;
+	struct http *hp;
+	struct gethdr_s gs;
+	
+	if (ctx->http_bereq !=NULL && ctx->http_bereq->magic== HTTP_MAGIC){
+		//bg-thread
+		hp = ctx->http_bereq;
+		gs.where = HDR_BEREQ;
+	}else{
+		//cl-thread
+		hp = ctx->http_req;
+		gs.where = HDR_REQ;
+	}
+	method= hp->hd[HTTP_HDR_METHOD].b;
+	requrl= hp->hd[HTTP_HDR_URL].b;
 
-    if (ctx->http_bereq !=NULL && ctx->http_bereq->magic== HTTP_MAGIC){
-        //bg-thread
-        hp = ctx->http_bereq;
-        gs.where = HDR_BEREQ;
-    }else{
-        //cl-thread
-        hp = ctx->http_req;
-        gs.where = HDR_REQ;
-    }
-    method= hp->hd[HTTP_HDR_METHOD].b;
-    requrl= hp->hd[HTTP_HDR_URL].b;
+	////////////////
+	//create date
+	time_t tt;
+	char amzdate[33];
+	char datestamp[25];
+	tt = time(NULL);
+	struct tm * gmtm = gmtime(&tt);
+	
+	sprintf(amzdate,
+		"%d%02d%02dT%02d%02d%02dZ",
+		gmtm->tm_year +1900,
+		gmtm->tm_mon  +1,
+		gmtm->tm_mday,
+		gmtm->tm_hour,
+		gmtm->tm_min,
+		gmtm->tm_sec
+	);
+	sprintf(datestamp,
+		"%d%02d%02d",
+		gmtm->tm_year +1900,
+		gmtm->tm_mon  +1,
+		gmtm->tm_mday
+	);
 
-    ////////////////
-    //create date
-    char amzdate[17];
-    char datestamp[9];
+	////////////////
+	//create payload
+	const char * payload_hash = vmod_hash_sha256(ctx, "");
+	
+	////////////////
+	//create signed headers
+	size_t tokenlen = 0;
+	if(token != NULL) tokenlen = strlen(token);
 
-    const char *x_amzdate = VRT_GetHdr(ctx, vmod_dyn(ctx, gs.where, "x-amz-date"));
-    strncpy(amzdate, x_amzdate, 16);
-    amzdate[16] = '\0';
-    
-    strncpy(datestamp, amzdate, 8);
-    datestamp[8] = '\0';
+	size_t len = strlen(signed_headers) + 32;
+	if(tokenlen > 0) len += 21; // ;x-amz-security-token
+	char *psh = WS_Alloc(ctx->ws,len);
+	char *psigned_headers = WS_Alloc(ctx->ws,len);
+	if(tokenlen > 0) {
+		sprintf(psh,"%sx-amz-content-sha256;x-amz-date;x-amz-security-token",signed_headers);
+	} else {
+		sprintf(psh,"%sx-amz-content-sha256;x-amz-date",signed_headers);
+	}
+	psigned_headers = headersort(ctx, psh, ';', 0);
+	////////////////
+	//create canonical headers
+	len = strlen(canonical_headers) + 115;
+	// Account for addition of "x-amz-security-token:[token]\n"
+	if(tokenlen > 0) len += 22 + tokenlen;
+	char *pch = WS_Alloc(ctx->ws,len);
+	char *pcanonical_headers = WS_Alloc(ctx->ws,len);
 
-    ////////////////
-    //create payload
-    const char * payload_hash = VRT_GetHdr(ctx, vmod_dyn(ctx, gs.where, "x-amz-content-sha256"));
+	if(tokenlen > 0) {
+		sprintf(pch,"%sx-amz-content-sha256:%s\nx-amz-date:%s\nx-amz-security-token:%s\n",canonical_headers,payload_hash,amzdate,token);
+	} else {
+		sprintf(pch,"%sx-amz-content-sha256:%s\nx-amz-date:%s\n",canonical_headers,payload_hash,amzdate);
+	}
+	pcanonical_headers = headersort(ctx, pch, '\n', '\n');
 
-    ////////////////
-    //create signed headers
-    size_t tokenlen = 0;
-    if(token != NULL) tokenlen = strlen(token);
+	////////////////
+	//create credential scope
+	len = strlen(datestamp)+ strlen(region)+ strlen(service)+ 16;
+	char *pcredential_scope = WS_Alloc(ctx->ws,len);
+	sprintf(pcredential_scope,"%s/%s/%s/aws4_request",datestamp,region,service);
+	
+	////////////////
+	//create canonical request
+	len = strlen(method)+ strlen(requrl)+ strlen(pcanonical_headers)+ strlen(psigned_headers)+ strlen(payload_hash) + 6;
+	char *pcanonical_request = WS_Alloc(ctx->ws,len);
+	char tmpform[32];
+	tmpform[0]=0;
+	char *ptmpform = &tmpform[0];
 
-    size_t len = strlen(signed_headers) + 32;
-    if(tokenlen > 0) len += 21; // ;x-amz-security-token
-    char *psh = WS_Alloc(ctx->ws,len);
-    char *psigned_headers = WS_Alloc(ctx->ws,len);
-    if(tokenlen > 0) {
-        sprintf(psh,"%sx-amz-content-sha256;x-amz-date;x-amz-security-token",signed_headers);
-    } else {
-        sprintf(psh,"%sx-amz-content-sha256;x-amz-date",signed_headers);
-    }
-    psigned_headers = headersort(ctx, psh, ';', 0);
-    ////////////////
-    //create canonical headers
-    len = strlen(canonical_headers) + 115;
-    // Account for addition of "x-amz-security-token:[token]\n"
-    if(tokenlen > 0) len += 22 + tokenlen;
-    char *pch = WS_Alloc(ctx->ws,len);
-    char *pcanonical_headers = WS_Alloc(ctx->ws,len);
+	char *adr = strchr(requrl, (int)'?');
+	if(adr == NULL){
+		sprintf(pcanonical_request,"%s\n%s\n\n%s\n%s\n%s",
+			method,
+			requrl,
+			pcanonical_headers,
+			psigned_headers,
+			payload_hash
+		);
+	}else{
+		sprintf(ptmpform,"%s.%lds\n%s","%s\n%",(adr - requrl),"%s\n%s\n%s\n%s");
+		sprintf(pcanonical_request,ptmpform,
+			method,
+			requrl,
+			adr + 1,
+			pcanonical_headers,
+			psigned_headers,
+			payload_hash
+		);
+	}
+	
+	
+	////////////////
+	//create string_to_sign
+	len = strlen(amzdate)+ strlen(pcredential_scope)+ 33;
+	char *pstring_to_sign = WS_Alloc(ctx->ws,len);
+	sprintf(pstring_to_sign,"AWS4-HMAC-SHA256\n%s\n%s\n%s",amzdate,pcredential_scope,vmod_hash_sha256(ctx, pcanonical_request));
+	
+	////////////////
+	//create signature
+	const char *signature = vmod_v4_getSignature(ctx,secret_key,datestamp,region,service,pstring_to_sign);
 
-    if(tokenlen > 0) {
-        sprintf(pch,"%sx-amz-content-sha256:%s\nx-amz-date:%s\nx-amz-security-token:%s\n",canonical_headers,payload_hash,amzdate,token);
-    } else {
-        sprintf(pch,"%sx-amz-content-sha256:%s\nx-amz-date:%s\n",canonical_headers,payload_hash,amzdate);
-    }
-    pcanonical_headers = headersort(ctx, pch, '\n', '\n');
-
-    ////////////////
-    //create credential scope
-    len = strlen(datestamp)+ strlen(region)+ strlen(service)+ 16;
-    char *pcredential_scope = WS_Alloc(ctx->ws,len);
-    sprintf(pcredential_scope,"%s/%s/%s/aws4_request",datestamp,region,service);
-
-    ////////////////
-    //create canonical request
-    len = strlen(method)+ strlen(requrl)+ strlen(pcanonical_headers)+ strlen(psigned_headers)+ strlen(payload_hash) + 6;
-    char *pcanonical_request = WS_Alloc(ctx->ws,len);
-    char tmpform[32];
-    tmpform[0]=0;
-    char *ptmpform = &tmpform[0];
-
-    char *adr = strchr(requrl, (int)'?');
-    if(adr == NULL){
-        sprintf(pcanonical_request,"%s\n%s\n\n%s\n%s\n%s",
-                method,
-                requrl,
-                pcanonical_headers,
-                psigned_headers,
-                payload_hash
-               );
-    }else{
-        sprintf(ptmpform,"%s.%lds\n%s","%s\n%",(adr - requrl),"%s\n%s\n%s\n%s");
-        sprintf(pcanonical_request,ptmpform,
-                method,
-                requrl,
-                adr + 1,
-                pcanonical_headers,
-                psigned_headers,
-                payload_hash
-               );
-    }
-
-    ////////////////
-    //create string_to_sign
-    len = strlen(amzdate)+ strlen(pcredential_scope)+ 33;
-    char *pstring_to_sign = WS_Alloc(ctx->ws,len);
-    sprintf(pstring_to_sign,"AWS4-HMAC-SHA256\n%s\n%s\n%s",amzdate,pcredential_scope,vmod_hash_sha256(ctx, pcanonical_request));
-
-    ////////////////
-    //create signature
-    const char *signature = vmod_v4_getSignature(ctx,secret_key,datestamp,region,service,pstring_to_sign);
-
-    ////////////////
-    //create authorization
-    len = strlen(access_key)+ strlen(pcredential_scope)+ strlen(psigned_headers)+ strlen(signature)+ 58;
-    char *pauthorization= WS_Alloc(ctx->ws,len);
-
-    sprintf(pauthorization,"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-            access_key,
-            pcredential_scope,
-            psigned_headers,
-            signature);
-
+	////////////////
+	//create authorization
+	len = strlen(access_key)+ strlen(pcredential_scope)+ strlen(psigned_headers)+ strlen(signature)+ 58;
+	char *pauthorization= WS_Alloc(ctx->ws,len);
+	
+	sprintf(pauthorization,"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
+		access_key,
+		pcredential_scope,
+		psigned_headers,
+		signature);
+	
 #if VRT_MAJOR_VERSION >= 14U
-    ////////////////
-    //Set to header
-    gs.what = "\016Authorization:";
-    VRT_SetHdr(ctx, &gs        , pauthorization , NULL);
-    gs.what = "\025x-amz-content-sha256:";
-    VRT_SetHdr(ctx, &gs , payload_hash , NULL);
-    gs.what = "\013x-amz-date:";
-    VRT_SetHdr(ctx, &gs           , amzdate , NULL);
-    if(tokenlen > 0){
-        gs.what="\025x-amz-security-token:";
-        VRT_SetHdr(ctx, &gs, token, NULL);
-    }
+        ////////////////
+        //Set to header
+        gs.what = "\016Authorization:";
+        VRT_SetHdr(ctx, &gs        , pauthorization , NULL);
+        gs.what = "\025x-amz-content-sha256:";
+        VRT_SetHdr(ctx, &gs , payload_hash , NULL);
+        gs.what = "\013x-amz-date:";
+        VRT_SetHdr(ctx, &gs           , amzdate , NULL);
+        if(tokenlen > 0){
+          gs.what="\025x-amz-security-token:";
+          VRT_SetHdr(ctx, &gs, token, NULL);
+        }
 #else
-    ////////////////
-    //Set to header
-    gs.what = "\016Authorization:";
-    VRT_SetHdr(ctx, &gs        , pauthorization , vrt_magic_string_end);
-    gs.what = "\025x-amz-content-sha256:";
-    VRT_SetHdr(ctx, &gs , payload_hash , vrt_magic_string_end);
-    gs.what = "\013x-amz-date:";
-    VRT_SetHdr(ctx, &gs           , amzdate , vrt_magic_string_end);
-    if(tokenlen > 0){
-        gs.what="\025x-amz-security-token:";
-        VRT_SetHdr(ctx, &gs, token, vrt_magic_string_end);
-    }
+        ////////////////
+        //Set to header
+        gs.what = "\016Authorization:";
+        VRT_SetHdr(ctx, &gs        , pauthorization , vrt_magic_string_end);
+        gs.what = "\025x-amz-content-sha256:";
+        VRT_SetHdr(ctx, &gs , payload_hash , vrt_magic_string_end);
+        gs.what = "\013x-amz-date:";
+        VRT_SetHdr(ctx, &gs           , amzdate , vrt_magic_string_end);
+        if(tokenlen > 0){
+          gs.what="\025x-amz-security-token:";
+          VRT_SetHdr(ctx, &gs, token, vrt_magic_string_end);
+        }
 #endif
 }
