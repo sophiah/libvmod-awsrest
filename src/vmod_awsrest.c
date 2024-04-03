@@ -66,7 +66,8 @@ char * headersort(VRT_CTX, char *txt, char sep, char sfx)
     if (cq == NULL)
         return (txt);
 
-    r = WS_Copy(ctx->ws, txt, -1);
+    r = WS_Copy(ctx->ws, txt, strlen(txt) + 1);
+    r[strlen(txt)] = '\0';
     if (r == NULL)
         return (txt);
 
@@ -393,7 +394,8 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
 ) {
     // split the current auth into auth elements
     char *splitToken;
-    char* mutable_str = WS_Copy(ctx->ws, current_auth, strlen(current_auth));
+    char* mutable_str = WS_Copy(ctx->ws, current_auth, strlen(current_auth) + 1);
+    mutable_str[strlen(current_auth)] = '\0';
 
     splitToken = strtok(mutable_str, " ,");
     while (splitToken!= NULL) {
@@ -425,7 +427,8 @@ void getAwsAuthElementFromAuthHeader (VRT_CTX,
     }
 
     // split credential to detail information
-    mutable_str = WS_Copy(ctx->ws, authe->credential, strlen(authe->credential));
+    mutable_str = WS_Copy(ctx->ws, authe->credential, strlen(authe->credential) + 1);
+    mutable_str[strlen(authe->credential)] = '\0';
 
     splitToken = strtok(mutable_str, "/");
     int idx = 0;
@@ -464,7 +467,8 @@ void getAwsAuthElementFromHttp(VRT_CTX,
         ALLOC_AND_STRNCPY(authe->queryString, "", 1);
     }
     else{
-        char* mutable_url = WS_Copy(ctx->ws, requrl, strlen(requrl));
+        char* mutable_url = WS_Copy(ctx->ws, requrl, strlen(requrl) + 1);
+        mutable_url[strlen(requrl)] = '\0';
         char* normalizedUrl = formurl(ctx, mutable_url);
 
         int total_len = strlen(normalizedUrl);
@@ -490,7 +494,10 @@ void composeAwsAuthElementForHeaders(VRT_CTX,
     enum gethdr_e where
 ) {
     char* headerName;
-    char* fullHeaderList = WS_Copy(ctx->ws, authe->signedHeaders, strlen(authe->signedHeaders));
+
+    char* fullHeaderList = WS_Copy(ctx->ws, authe->signedHeaders, strlen(authe->signedHeaders) + 1);
+    fullHeaderList[strlen(authe->signedHeaders)] = '\0';
+
     headerName = strtok(fullHeaderList, ";");
     int currentTotalLen = 0;
     while (headerName != NULL) {
@@ -510,7 +517,6 @@ void composeAwsAuthElementForHeaders(VRT_CTX,
         currentTotalLen = currentTotalLen + currentHeaderLen;
 
         ALLOC_AND_STRNCPY(authe->headerList, tmp_full, currentTotalLen);
-        // VSLb(ctx->vsl, SLT_VCL_Log, "authe->headerList ==> %s", authe->headerList);
 
         headerName = strtok(NULL, ";");
     }
@@ -562,7 +568,7 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
     sprintf(canonical_request, "%s\n%s\n%s\n%s\n%s\n%s",
             elements.httpMethod, elements.requestUri, elements.queryString,
             elements.headerList, elements.signedHeaders, elements.contentPayloadHash);
-
+    
     int len_credential_scope = strlen(elements.datestamp) + 1
                              + strlen(elements.region) + 1
                              + strlen(elements.service) + 1
@@ -587,14 +593,13 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
         vmod_hash_sha256(ctx, canonical_request)
     );
 
-    // VSLb(ctx->vsl, SLT_VCL_Log, "string_to_sign => %s",  string_to_sign);
     const char *signature = vmod_v4_getSignature(ctx, secret_key, 
         elements.datestamp, 
         elements.region,
         elements.service,
         string_to_sign);
 
-    // VSLb(ctx->vsl, SLT_VCL_Log, "signature => %s",  signature);
+    VSLb(ctx->vsl, SLT_VCL_Log, "signature => %s",  signature);
     int compareResult = strcmp(elements.signature, signature);
     if ( compareResult == 0 ) {
         return true;
