@@ -568,6 +568,29 @@ VCL_BOOL vmod_v4_validate(VRT_CTX,
     sprintf(canonical_request, "%s\n%s\n%s\n%s\n%s\n%s",
             elements.httpMethod, elements.requestUri, elements.queryString,
             elements.headerList, elements.signedHeaders, elements.contentPayloadHash);
+
+    ////////////////
+    // char *credential_req_temp = WS_Alloc(ctx->ws, totalSize + 1);
+    // memset(credential_req_temp, '\0', totalSize + 1);
+    // sprintf(credential_req_temp, "%s", elements.httpMethod);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "xxxx (1) => %s", vmod_hash_sha256(ctx, credential_req_temp));
+
+    // sprintf(credential_req_temp, "%s\n%s", elements.httpMethod, elements.requestUri);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "xxxx (2) => %s", vmod_hash_sha256(ctx, credential_req_temp));
+
+    // sprintf(credential_req_temp, "%s\n%s\n%s", elements.httpMethod, elements.requestUri, elements.queryString);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "xxxx (3) => %s %s", elements.queryString, vmod_hash_sha256(ctx, credential_req_temp));
+
+    // sprintf(credential_req_temp, "%s\n%s\n%s\n%s", elements.httpMethod, elements.requestUri, elements.queryString, elements.headerList);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "xxxx (4) => %s", vmod_hash_sha256(ctx, credential_req_temp));
+
+    // sprintf(credential_req_temp, "%s\n%s\n%s\n%s\n%s", elements.httpMethod, elements.requestUri, elements.queryString, elements.headerList, elements.signedHeaders);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "xxxx (5) => %s", vmod_hash_sha256(ctx, credential_req_temp));
+
+    // sprintf(credential_req_temp, "%s\n%s\n%s\n%s\n%s\n%s", elements.httpMethod, elements.requestUri, elements.queryString, elements.headerList, elements.signedHeaders, elements.contentPayloadHash);
+    // VSLb(ctx->vsl, SLT_VCL_Log, "xxxx (6) => %s", vmod_hash_sha256(ctx, credential_req_temp));
+
+    ////////////////
     
     int len_credential_scope = strlen(elements.datestamp) + 1
                              + strlen(elements.region) + 1
