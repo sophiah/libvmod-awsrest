@@ -1,9 +1,9 @@
 AC_PREREQ([2.68])
-AC_INIT([libvmod-awsrest], [0.1], [], [vmod-awsrest])
+AC_INIT([libvmod-awsrestv2], [0.1], [], [vmod-awsrestv2])
 AC_COPYRIGHT([Copyright (c) 2012-2017 Shohei Tanaka(@xcir)])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR([build-aux])
-AC_CONFIG_SRCDIR(src/vmod_awsrest.vcc)
+AC_CONFIG_SRCDIR(src/vmod_awsrestv2.vcc)
 AC_CONFIG_HEADER([config.h])
 
 AM_INIT_AUTOMAKE([1.12 -Wall -Werror foreign parallel-tests])
@@ -21,7 +21,7 @@ CC="$PTHREAD_CC"
 
 
 AC_CHECK_LIB(mhash, mhash_count, [AC_DEFINE([HAVE_MHASH],[1],[Define we have mhash])],
-       [AC_MSG_ERROR([libvmod-awsrest requires libmhash.])])
+       [AC_MSG_ERROR([libvmod-awsrestv2 requires libmhash.])])
 
 AC_ARG_WITH([rst2man],
 	[AS_HELP_STRING(
@@ -33,10 +33,10 @@ AC_ARG_WITH([rst2man],
 
 m4_ifndef([VARNISH_PREREQ], AC_MSG_ERROR([Need varnish.m4 -- see README.rst]))
 
-VARNISH_PREREQ([5.0])
-VARNISH_VMODS([awsrest])
+VARNISH_PREREQ([7.0])
+VARNISH_VMODS([awsrestv2])
 
-VMOD_TESTS="$(cd $srcdir/src && echo tests/*.vtc)"
+VMOD_TESTS=""
 AC_SUBST(VMOD_TESTS)
 
 PKG_CHECK_VAR([LIBVARNISHAPI_LIBDIR], [varnishapi], [libdir])
