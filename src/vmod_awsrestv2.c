@@ -227,6 +227,7 @@ static const char * vmod_hmac_sha256(VRT_CTX,
     char *p;
     char *ptmp;
     p    = WS_Alloc(ctx->ws, blocksize * 2 + 1);
+    memset(p, '\0', blocksize * 2 + 1);
     ptmp = p;
 
     unsigned char *mac;
@@ -499,17 +500,18 @@ char* composeHeadersFromSignedHeaders(VRT_CTX,
         int len_headerVal = strlen(headerVal);
         int len_current_header = len_headerName + 1 + len_headerVal + 2 ; /* name:val \n */
 
-        char* tmp_full = WS_Alloc(ctx->ws, len_current_total + len_current_header + 1);
-        memset(tmp_full, '\0', len_current_total + len_current_header + 1);
+        int target_total = len_current_total + len_current_header + 1;
+        char* tmp_full = WS_Alloc(ctx->ws, target_total);
+        memset(tmp_full, '\0', target_total);
 
         if (len_current_total == 0) {
             sprintf(tmp_full, "%s:%s\n", headerName, headerVal);
         } else {
             sprintf(tmp_full, "%s%s:%s\n", r, headerName, headerVal);
         }
-        len_current_total = len_current_total + len_current_header;
-
-        ALLOC_AND_STRNCPY(r, tmp_full, len_current_total);
+        VSLb(ctx->vsl, SLT_VCL_Log, "%s",  tmp_full);
+        len_current_total = target_total;
+        ALLOC_AND_STRNCPY(r, tmp_full, target_total);
 
         headerName = strtok(NULL, ";");
     }
